@@ -1,0 +1,40 @@
+name: Build Windows Electron App
+
+on:
+  workflow_dispatch:
+
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Build Next.js
+        run: npm run build
+
+      - name: Package Electron App
+        run: npx electron-builder --win
+
+      - name: Upload Installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: VijayCollection-Windows
+          path: |
+            dist/*.exe
+            dist/*.msi
+            dist/latest.yml
