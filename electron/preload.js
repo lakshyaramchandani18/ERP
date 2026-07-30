@@ -14,4 +14,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   printDocument: (options) => ipcRenderer.invoke('print-document', options),
   saveInvoicePdf: (data) => ipcRenderer.invoke('save-invoice-pdf', data),
+  uploadCustomTemplate: (data) => ipcRenderer.invoke('upload-custom-template', data),
+  listCustomTemplates: () => ipcRenderer.invoke('list-custom-templates'),
+  deleteCustomTemplate: (templateId) => ipcRenderer.invoke('delete-custom-template', templateId),
+  processCustomTemplate: (data) => ipcRenderer.invoke('process-custom-template', data),
 });

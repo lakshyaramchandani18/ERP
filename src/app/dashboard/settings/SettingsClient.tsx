@@ -21,7 +21,8 @@ import {
   Copy,
   Trash2,
   CheckCircle2,
-  Edit2,
+  FileText,
+  FileCode,
   Star,
 } from 'lucide-react';
 import {
@@ -36,7 +37,17 @@ export default function SettingsClient({ settings: initialSettings }: { settings
   const [dataPaths, setDataPaths] = useState<any>(null);
   const [localBackups, setLocalBackups] = useState<any[]>([]);
   const [cloudBackups, setCloudBackups] = useState<any[]>([]);
+  const [customUploadedTemplates, setCustomUploadedTemplates] = useState<any[]>([]);
   const [isLoadingCloud, setIsLoadingCloud] = useState(false);
+
+  // Upload Custom Template Modal state
+  const [showCustomUploadModal, setShowCustomUploadModal] = useState(false);
+  const [customTempName, setCustomTempName] = useState('');
+  const [customTempPaperSize, setCustomTempPaperSize] = useState('A4');
+  const [customTempOrientation, setCustomTempOrientation] = useState('Portrait');
+  const [customTempNotes, setCustomTempNotes] = useState('');
+  const [selectedFileBase64, setSelectedFileBase64] = useState<string | null>(null);
+  const [selectedFileName, setSelectedFileName] = useState<string>('');
 
   // Backup modal / options
   const [encryptBackup, setEncryptBackup] = useState(false);
@@ -66,7 +77,7 @@ export default function SettingsClient({ settings: initialSettings }: { settings
     { ...defaultTemplateConfig, id: 'template-a5-landscape', name: 'A5 Landscape Invoice', isDefault: false, format: 'A5_LANDSCAPE' },
   ]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('template-80mm-default');
-  const [activeTab, setActiveTab] = useState<'invoice' | 'backup' | 'gdrive'>('invoice');
+  const [activeTab, setActiveTab] = useState<'invoice' | 'custom' | 'backup' | 'gdrive'>('invoice');
 
   // Dummy Sale Object for Live Preview
   const previewSale = {
@@ -139,6 +150,7 @@ export default function SettingsClient({ settings: initialSettings }: { settings
         }
       });
       loadLocalBackups();
+      loadCustomTemplates();
     }
   }, []);
 
@@ -148,6 +160,13 @@ export default function SettingsClient({ settings: initialSettings }: { settings
     if (typeof window !== 'undefined' && (window as any).electronAPI) {
       const list = await (window as any).electronAPI.listLocalBackups();
       setLocalBackups(list || []);
+    }
+  };
+
+  const loadCustomTemplates = async () => {
+    if (typeof window !== 'undefined' && (window as any).electronAPI) {
+      const list = await (window as any).electronAPI.listCustomTemplates();
+      setCustomUploadedTemplates(list || []);
     }
   };
 
@@ -174,7 +193,7 @@ export default function SettingsClient({ settings: initialSettings }: { settings
         pan: currentTemplate.pan,
         autoBackupSchedule: schedule,
         invoiceTemplates: templates,
-        invoiceConfig: currentTemplate, // active default config
+        invoiceConfig: currentTemplate,
         gdrive: {
           enabled: gdriveEnabled,
           autoUpload: gdriveAutoUpload,
@@ -194,7 +213,7 @@ export default function SettingsClient({ settings: initialSettings }: { settings
     );
   };
 
-  // Template Actions: Create, Duplicate, Delete, Set Default
+  // Template Actions
   const handleCreateTemplate = () => {
     const name = prompt('Enter New Invoice Template Name:', 'Custom Bill Template');
     if (!name) return;
@@ -230,7 +249,7 @@ export default function SettingsClient({ settings: initialSettings }: { settings
       return;
     }
     if (currentTemplate.isDefault) {
-      alert('Cannot delete the default template. Mark another template as default first.');
+      alert('Cannot delete default template.');
       return;
     }
     if (confirm(`Delete template "${currentTemplate.name}"?`)) {
@@ -245,6 +264,65 @@ export default function SettingsClient({ settings: initialSettings }: { settings
       prev.map((t) => ({ ...t, isDefault: t.id === selectedTemplateId }))
     );
     setStatusMsg(`"${currentTemplate.name}" is now the default printing template.`);
+  };
+
+  // Upload Custom PDF / DOCX Template File
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setSelectedFileName(file.name);
+    if (!customTempName) setCustomTempName(file.name.replace(/\.[^/.]+$/, ''));
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = (reader.result as string).split(',')[1];
+      setSelectedFileBase64(base64);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleUploadCustomTemplate = async () => {
+    if (!selectedFileBase64) {
+      alert('Please select a PDF (.pdf) or Word (.docx) template file.');
+      return;
+    }
+
+    if (typeof window !== 'undefined' && (window as any).electronAPI) {
+      const res = await (window as any).electronAPI.uploadCustomTemplate({
+        fileBase64: selectedFileBase64,
+        fileName: selectedFileName,
+        templateName: customTempName,
+        paperSize: customTempPaperSize,
+        orientation: customTempOrientation,
+        notes: customTempNotes,
+      });
+
+      setShowCustomUploadModal(false);
+      setSelectedFileBase64(null);
+      setSelectedFileName('');
+      setCustomTempName('');
+      setCustomTempNotes('');
+
+      if (res.success) {
+        setStatusMsg(`Uploaded custom template "${res.template.name}" successfully!`);
+        loadCustomTemplates();
+      } else {
+        setStatusMsg(`Upload failed: ${res.error}`);
+      }
+    }
+  };
+
+  const handleDeleteCustomUploadedTemplate = async (id: string) => {
+    if (confirm('Delete this uploaded custom template?')) {
+      if (typeof window !== 'undefined' && (window as any).electronAPI) {
+        const res = await (window as any).electronAPI.deleteCustomTemplate(id);
+        if (res.success) {
+          setStatusMsg('Custom template deleted.');
+          loadCustomTemplates();
+        }
+      }
+    }
   };
 
   const handleCreateBackup = async () => {
@@ -317,9 +395,9 @@ export default function SettingsClient({ settings: initialSettings }: { settings
   return (
     <div className="space-y-8 max-w-6xl">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">ERP Settings & Invoice Designer</h1>
+        <h1 className="text-2xl font-bold tracking-tight">ERP Settings & Custom Invoice Templates</h1>
         <p className="text-sm text-muted-foreground">
-          Manage customizable bill layouts, paper formats (A4/A5 Portrait & Landscape, Thermal), backup archives, and cloud sync.
+          Design bills, upload custom PDF & Word (.docx) templates with placeholder tags, manage backups, and cloud sync.
         </p>
       </div>
 
@@ -345,7 +423,18 @@ export default function SettingsClient({ settings: initialSettings }: { settings
               : 'border-transparent text-gray-500 hover:text-gray-900'
           }`}
         >
-          <Printer className="h-4 w-4" /> Invoice Designer & Template Manager
+          <Printer className="h-4 w-4" /> Invoice Designer
+        </button>
+
+        <button
+          onClick={() => setActiveTab('custom')}
+          className={`pb-3 flex items-center gap-2 border-b-2 transition ${
+            activeTab === 'custom'
+              ? 'border-blue-600 text-blue-600 font-bold'
+              : 'border-transparent text-gray-500 hover:text-gray-900'
+          }`}
+        >
+          <FileCode className="h-4 w-4" /> Upload Custom Templates (.PDF / .DOCX)
         </button>
 
         <button
@@ -374,7 +463,6 @@ export default function SettingsClient({ settings: initialSettings }: { settings
       {/* TAB 1: INVOICE DESIGNER & TEMPLATES */}
       {activeTab === 'invoice' && (
         <div className="space-y-6">
-          {/* Template Selection Toolbar */}
           <div className="bg-white dark:bg-gray-950 rounded-xl shadow-sm border dark:border-gray-800 p-4 flex flex-wrap justify-between items-center gap-4">
             <div className="flex items-center gap-3">
               <label className="text-sm font-bold">Select Active Template:</label>
@@ -420,7 +508,6 @@ export default function SettingsClient({ settings: initialSettings }: { settings
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-            {/* Controls Form (7 cols) */}
             <div className="lg:col-span-7 space-y-6">
               <div className="bg-white dark:bg-gray-950 rounded-xl shadow-sm border dark:border-gray-800 p-6 space-y-6">
                 <div className="border-b pb-4">
@@ -429,7 +516,6 @@ export default function SettingsClient({ settings: initialSettings }: { settings
                   </h2>
                 </div>
 
-                {/* Template Name & Paper Format */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <label className="text-xs font-medium">Template Name</label>
@@ -456,7 +542,6 @@ export default function SettingsClient({ settings: initialSettings }: { settings
                   </div>
                 </div>
 
-                {/* Branding Fields */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <label className="text-xs font-medium">Shop Name</label>
@@ -507,7 +592,6 @@ export default function SettingsClient({ settings: initialSettings }: { settings
                   />
                 </div>
 
-                {/* Field Visibility Toggles */}
                 <div className="pt-4 border-t space-y-3">
                   <h3 className="text-sm font-semibold">Field Visibility Controls</h3>
                   <div className="grid grid-cols-2 gap-3 text-xs">
@@ -547,7 +631,6 @@ export default function SettingsClient({ settings: initialSettings }: { settings
               </div>
             </div>
 
-            {/* Live Preview Container (5 cols) */}
             <div className="lg:col-span-5 space-y-4">
               <div className="bg-white dark:bg-gray-950 rounded-xl shadow-sm border dark:border-gray-800 p-4 sticky top-6">
                 <div className="flex justify-between items-center border-b pb-3 mb-4">
@@ -570,7 +653,98 @@ export default function SettingsClient({ settings: initialSettings }: { settings
         </div>
       )}
 
-      {/* TAB 2: BACKUP & RESTORE */}
+      {/* TAB 2: UPLOAD CUSTOM TEMPLATES (.PDF / .DOCX) */}
+      {activeTab === 'custom' && (
+        <div className="space-y-6">
+          <div className="bg-white dark:bg-gray-950 rounded-xl shadow-sm border dark:border-gray-800 p-6 space-y-4">
+            <div className="flex flex-wrap justify-between items-center gap-4">
+              <div>
+                <h2 className="text-lg font-bold flex items-center gap-2">
+                  <FileCode className="h-5 w-5 text-purple-600" /> Custom File Templates (`Documents/ClothShop ERP/Invoice Templates/`)
+                </h2>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Upload your own PDF background templates or Word (.docx) invoices with placeholder tags like <code className="bg-gray-100 px-1 py-0.5 rounded font-mono text-purple-600">{"{{INVOICE_NUMBER}}"}</code>.
+                </p>
+              </div>
+
+              <Button type="button" onClick={() => setShowCustomUploadModal(true)} className="bg-purple-600 hover:bg-purple-700 text-white flex items-center gap-2">
+                <Upload className="h-4 w-4" /> Upload PDF / DOCX Template
+              </Button>
+            </div>
+          </div>
+
+          {/* Placeholders Field Reference Sheet */}
+          <div className="bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 rounded-xl p-6 space-y-3">
+            <h3 className="text-sm font-bold text-purple-900 dark:text-purple-200 flex items-center gap-2">
+              <FileText className="h-4 w-4" /> Supported Placeholder Tags for Word (.docx) & PDF Mappings
+            </h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs font-mono text-purple-800 dark:text-purple-300">
+              <span className="bg-white/80 p-1.5 rounded border">{"{{SHOP_NAME}}"}</span>
+              <span className="bg-white/80 p-1.5 rounded border">{"{{SHOP_ADDRESS}}"}</span>
+              <span className="bg-white/80 p-1.5 rounded border">{"{{GST_NUMBER}}"}</span>
+              <span className="bg-white/80 p-1.5 rounded border">{"{{PHONE}}"}</span>
+              <span className="bg-white/80 p-1.5 rounded border">{"{{EMAIL}}"}</span>
+              <span className="bg-white/80 p-1.5 rounded border">{"{{CUSTOMER_NAME}}"}</span>
+              <span className="bg-white/80 p-1.5 rounded border">{"{{CUSTOMER_PHONE}}"}</span>
+              <span className="bg-white/80 p-1.5 rounded border">{"{{CUSTOMER_ADDRESS}}"}</span>
+              <span className="bg-white/80 p-1.5 rounded border">{"{{INVOICE_NUMBER}}"}</span>
+              <span className="bg-white/80 p-1.5 rounded border">{"{{INVOICE_DATE}}"}</span>
+              <span className="bg-white/80 p-1.5 rounded border">{"{{PAYMENT_METHOD}}"}</span>
+              <span className="bg-white/80 p-1.5 rounded border font-bold text-purple-900">{"{{PRODUCT_TABLE}}"}</span>
+              <span className="bg-white/80 p-1.5 rounded border">{"{{SUBTOTAL}}"}</span>
+              <span className="bg-white/80 p-1.5 rounded border">{"{{DISCOUNT}}"}</span>
+              <span className="bg-white/80 p-1.5 rounded border">{"{{GST}}"}</span>
+              <span className="bg-white/80 p-1.5 rounded border font-bold text-purple-900">{"{{GRAND_TOTAL}}"}</span>
+            </div>
+          </div>
+
+          {/* Uploaded Custom Templates Table */}
+          <div className="bg-white dark:bg-gray-950 rounded-xl shadow-sm border dark:border-gray-800 p-6 space-y-4">
+            <h3 className="text-base font-bold">Uploaded Custom Templates</h3>
+
+            {customUploadedTemplates.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-6 text-center">No custom PDF or DOCX templates uploaded yet.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm text-left">
+                  <thead className="text-xs uppercase bg-gray-50 dark:bg-gray-900 border-b">
+                    <tr>
+                      <th className="px-4 py-3">Template Name</th>
+                      <th className="px-4 py-3">File Type</th>
+                      <th className="px-4 py-3">Paper Size</th>
+                      <th className="px-4 py-3">Uploaded Date</th>
+                      <th className="px-4 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {customUploadedTemplates.map((ct) => (
+                      <tr key={ct.id} className="hover:bg-gray-50/50 dark:hover:bg-gray-900/50">
+                        <td className="px-4 py-3 font-semibold">{ct.name}</td>
+                        <td className="px-4 py-3 font-mono text-xs uppercase">{ct.fileType}</td>
+                        <td className="px-4 py-3 text-xs">{ct.paperSize} ({ct.orientation})</td>
+                        <td className="px-4 py-3 text-xs">{new Date(ct.uploadDate).toLocaleString()}</td>
+                        <td className="px-4 py-3 text-right">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDeleteCustomUploadedTemplate(ct.id)}
+                            className="text-red-600 hover:text-red-800"
+                          >
+                            <Trash2 className="h-4 w-4" /> Delete
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: BACKUP & RESTORE */}
       {activeTab === 'backup' && (
         <div className="space-y-6">
           <div className="bg-gradient-to-r from-blue-900 to-indigo-900 text-white rounded-xl p-6 shadow-md flex items-center justify-between">
@@ -722,7 +896,7 @@ export default function SettingsClient({ settings: initialSettings }: { settings
         </div>
       )}
 
-      {/* TAB 3: GOOGLE DRIVE CLOUD SYNC */}
+      {/* TAB 4: GOOGLE DRIVE CLOUD SYNC */}
       {activeTab === 'gdrive' && (
         <div className="space-y-6">
           <div className="bg-white dark:bg-gray-950 rounded-xl shadow-sm border dark:border-gray-800 p-6 space-y-6">
@@ -828,6 +1002,86 @@ export default function SettingsClient({ settings: initialSettings }: { settings
                 </table>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Upload Custom PDF / DOCX Template Modal */}
+      {showCustomUploadModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-950 border dark:border-gray-800 rounded-2xl max-w-md w-full p-6 space-y-6 shadow-2xl">
+            <h3 className="text-lg font-bold flex items-center gap-2">
+              <Upload className="h-5 w-5 text-purple-600" /> Upload Custom PDF / DOCX Template
+            </h3>
+
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Template Display Name</label>
+                <Input
+                  type="text"
+                  placeholder="e.g. My Wholesale Invoice Template"
+                  value={customTempName}
+                  onChange={(e) => setCustomTempName(e.target.value)}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium">Paper Size</label>
+                  <select
+                    value={customTempPaperSize}
+                    onChange={(e) => setCustomTempPaperSize(e.target.value)}
+                    className="w-full h-10 rounded-md border bg-background px-3 text-xs"
+                  >
+                    <option value="A4">A4</option>
+                    <option value="A5">A5</option>
+                    <option value="80mm">80mm Thermal</option>
+                    <option value="58mm">58mm Thermal</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium">Orientation</label>
+                  <select
+                    value={customTempOrientation}
+                    onChange={(e) => setCustomTempOrientation(e.target.value)}
+                    className="w-full h-10 rounded-md border bg-background px-3 text-xs"
+                  >
+                    <option value="Portrait">Portrait</option>
+                    <option value="Landscape">Landscape</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Select File (.pdf or .docx)</label>
+                <input
+                  type="file"
+                  accept=".pdf,.docx"
+                  onChange={handleFileChange}
+                  className="w-full text-xs file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Notes / Instructions</label>
+                <Input
+                  type="text"
+                  placeholder="e.g. Use for GST wholesale customers"
+                  value={customTempNotes}
+                  onChange={(e) => setCustomTempNotes(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-4 border-t">
+              <Button type="button" variant="ghost" onClick={() => setShowCustomUploadModal(false)}>
+                Cancel
+              </Button>
+              <Button type="button" onClick={handleUploadCustomTemplate} className="bg-purple-600 hover:bg-purple-700 text-white">
+                Upload & Register Template
+              </Button>
+            </div>
           </div>
         </div>
       )}

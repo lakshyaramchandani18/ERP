@@ -4,6 +4,7 @@ const fs = require('fs');
 const net = require('net');
 const backupEngine = require('./backup');
 const gdriveEngine = require('./gdrive');
+const templateEngine = require('./template-engine');
 
 let mainWindow;
 
@@ -360,6 +361,39 @@ ipcMain.handle('save-invoice-pdf', async (event, { invoiceNo, pdfBase64 }) => {
       return { success: true, pdfPath };
     }
     return { success: false, error: 'No PDF data provided' };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// Custom Template IPC Handlers
+ipcMain.handle('upload-custom-template', async (event, data) => {
+  try {
+    return templateEngine.saveUploadedTemplateFile({
+      baseDataDir: DATA_DIR,
+      ...data,
+    });
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('list-custom-templates', async () => {
+  return templateEngine.listCustomTemplates(DATA_DIR);
+});
+
+ipcMain.handle('delete-custom-template', async (event, templateId) => {
+  return templateEngine.deleteCustomTemplate(DATA_DIR, templateId);
+});
+
+ipcMain.handle('process-custom-template', async (event, { templateId, sale, shopConfig }) => {
+  try {
+    return await templateEngine.processCustomTemplate({
+      baseDataDir: DATA_DIR,
+      templateId,
+      sale,
+      shopConfig,
+    });
   } catch (err) {
     return { success: false, error: err.message };
   }
